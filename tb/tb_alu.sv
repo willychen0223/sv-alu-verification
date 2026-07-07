@@ -24,6 +24,50 @@ module tb;
     forever #5 clk = ~clk;
   end
 
+  // ------------------------------------------------------------
+  // Assertions
+  // ------------------------------------------------------------
+
+  // Assertion 1:
+  // During reset, output c should be 0.
+  property p_reset_c_zero;
+    @(posedge clk)
+      (!rst_n) |-> (c == 5'sd0);
+  endproperty
+
+  assert property (p_reset_c_zero)
+    else $error("ASSERTION FAILED: c is not zero during reset");
+
+  // Assertion 2:
+  // rst_n should never be X or Z.
+  property p_reset_known;
+    @(posedge clk)
+      !$isunknown(rst_n);
+  endproperty
+
+  assert property (p_reset_known)
+    else $error("ASSERTION FAILED: rst_n is X or Z");
+
+  // Assertion 3:
+  // During normal operation, op should never be X or Z.
+  property p_op_known;
+    @(posedge clk)
+      rst_n |-> !$isunknown(op);
+  endproperty
+
+  assert property (p_op_known)
+    else $error("ASSERTION FAILED: op is X or Z during normal operation");
+
+  // Assertion 4:
+  // During normal operation, output c should not be X or Z.
+  property p_c_known;
+    @(posedge clk)
+      rst_n |-> !$isunknown(c);
+  endproperty
+
+  assert property (p_c_known)
+    else $error("ASSERTION FAILED: c is X or Z during normal operation");
+
   covergroup alu_cov_cg with function sample(
     input logic signed [3:0] sampled_a,
     input logic signed [3:0] sampled_b,
