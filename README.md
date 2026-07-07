@@ -26,13 +26,13 @@ The DUT is a small clocked ALU with:
 
 ## Opcode Table
 
+
 | Opcode | Operation | Description |
 |---|---|---|
 | `2'b00` | `a + b` | Signed addition |
 | `2'b01` | `a - b` | Signed subtraction |
 | `2'b10` | `~a` | Bitwise invert of `a` |
-| `2'b11` | `a|b` | Reduction OR of `b` |
-
+| `2'b11` | `\|b` | Reduction OR of `b` |
 ## File Structure
 
 ```text
