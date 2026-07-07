@@ -24,6 +24,46 @@ module tb;
     forever #5 clk = ~clk;
   end
 
+  covergroup alu_cov_cg with function sample(
+    input logic signed [3:0] sampled_a,
+    input logic signed [3:0] sampled_b,
+    input logic        [1:0] sampled_op,
+    input logic signed [4:0] sampled_result
+  );
+
+    option.per_instance = 1;
+
+    cp_op: coverpoint sampled_op {
+      bins add    = {2'b00};
+      bins sub    = {2'b01};
+      bins inv    = {2'b10};
+      bins red_or = {2'b11};
+    }
+
+    cp_a: coverpoint sampled_a {
+      bins negative = {[-8:-1]};
+      bins zero     = {0};
+      bins positive = {[1:7]};
+    }
+
+    cp_b: coverpoint sampled_b {
+      bins negative = {[-8:-1]};
+      bins zero     = {0};
+      bins positive = {[1:7]};
+    }
+
+    cp_result: coverpoint sampled_result {
+      bins negative = {[-16:-1]};
+      bins zero     = {0};
+      bins positive = {[1:15]};
+    }
+
+    cross_op_a: cross cp_op, cp_a;
+
+  endgroup
+
+  alu_cov_cg alu_cov;
+
   function automatic logic signed [4:0] calc_expected(
     input logic signed [3:0] fa,
     input logic signed [3:0] fb,
@@ -49,6 +89,8 @@ module tb;
     input string             test_name
   );
     begin
+      alu_cov.sample(checked_a, checked_b, checked_op, actual);
+
       if (actual !== expected) begin
         fail_count++;
 
@@ -91,6 +133,8 @@ module tb;
     $dumpfile("wave.vcd");
     $dumpvars(0, tb);
 
+    alu_cov = new();
+
     pass_count = 0;
     fail_count = 0;
 
@@ -112,6 +156,10 @@ module tb;
     apply_and_check(4'sd7,    4'sd7,   2'b00, "ADD max positive");
     apply_and_check(-4'sd8,   4'sd7,   2'b01, "SUB negative edge");
 
+    // Extra directed tests for coverage closure
+    apply_and_check(4'sd0,    4'sd3,   2'b00, "ADD a zero");
+    apply_and_check(4'sd0,    4'sd3,   2'b01, "SUB a zero");
+
     // Random tests
     for (int i = 0; i < 50; i++) begin
       logic signed [3:0] rand_a;
@@ -129,6 +177,7 @@ module tb;
     $display("Simulation completed.");
     $display("PASS count = %0d", pass_count);
     $display("FAIL count = %0d", fail_count);
+    $display("Functional coverage = %0.2f%%", alu_cov.get_inst_coverage());
     $display("----------------------------------------");
 
     if (fail_count == 0)
