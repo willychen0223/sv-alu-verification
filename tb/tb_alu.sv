@@ -21,6 +21,31 @@ module tb;
     forever #5 clk = ~clk;
   end
 
+  task automatic apply_and_check(
+    input logic signed [3:0] ta,
+    input logic signed [3:0] tb,
+    input logic        [1:0] top,
+    input logic signed [4:0] expected,
+    input string             test_name
+  );
+    begin
+      @(posedge clk);
+      a  = ta;
+      b  = tb;
+      op = top;
+
+      @(posedge clk);
+      #1;
+
+      if (c !== expected) begin
+        $display("FAIL: %s, a=%0d, b=%0d, op=%b, expected=%0d, actual=%0d",
+                 test_name, ta, tb, top, expected, c);
+      end else begin
+        $display("PASS: %s", test_name);
+      end
+    end
+  endtask
+
   initial begin
     $dumpfile("wave.vcd");
     $dumpvars(0, tb);
@@ -33,67 +58,14 @@ module tb;
     repeat (2) @(posedge clk);
     rst_n = 1;
 
-    // ADD: 3 + 2 = 5
-    @(posedge clk);
-    a = 4'sd3;
-    b = 4'sd2;
-    op = 2'b00;
-    @(posedge clk);
-    #1;
-    if (c !== 5'sd5)
-      $display("FAIL: ADD, expected=5, actual=%0d", c);
-    else
-      $display("PASS: ADD");
+    apply_and_check(4'sd3,    4'sd2,   2'b00,  5'sd5,    "ADD");
+    apply_and_check(4'sd3,    4'sd5,   2'b01, -5'sd2,    "SUB");
+    apply_and_check(4'sb0011, 4'sd0,   2'b10,  5'b11100, "INV");
+    apply_and_check(4'sd0,    4'b0000, 2'b11,  5'sd0,    "OR zero");
+    apply_and_check(4'sd0,    4'b0100, 2'b11,  5'sd1,    "OR nonzero");
 
-    // SUB: 3 - 5 = -2
-    @(posedge clk);
-    a = 4'sd3;
-    b = 4'sd5;
-    op = 2'b01;
-    @(posedge clk);
-    #1;
-    if (c !== -5'sd2)
-      $display("FAIL: SUB, expected=-2, actual=%0d", c);
-    else
-      $display("PASS: SUB");
-
-    // INV: ~0011 = 1100.
-    // Since a is signed [3:0], 4'b1100 is -4.
-    // Assigned to signed [4:0], it becomes sign-extended: 5'b11100.
-    @(posedge clk);
-    a = 4'sb0011;
-    b = 4'sd0;
-    op = 2'b10;
-    @(posedge clk);
-    #1;
-    if (c !== 5'b11100)
-      $display("FAIL: INV, expected=11100, actual=%b", c);
-    else
-      $display("PASS: INV");
-
-    // OR zero: |0000 = 0
-    @(posedge clk);
-    a = 4'sd0;
-    b = 4'b0000;
-    op = 2'b11;
-    @(posedge clk);
-    #1;
-    if (c !== 5'sd0)
-      $display("FAIL: OR zero, expected=0, actual=%0d", c);
-    else
-      $display("PASS: OR zero");
-
-    // OR nonzero: |0100 = 1
-    @(posedge clk);
-    a = 4'sd0;
-    b = 4'b0100;
-    op = 2'b11;
-    @(posedge clk);
-    #1;
-    if (c !== 5'sd1)
-      $display("FAIL: OR nonzero, expected=1, actual=%0d", c);
-    else
-      $display("PASS: OR nonzero");
+    apply_and_check(4'sd7,    4'sd7,   2'b00,  5'sd14,   "ADD max positive");
+    apply_and_check(-4'sd8,   4'sd7,   2'b01, -5'sd15,   "SUB negative edge");
 
     $display("All directed tests completed.");
     $finish;
