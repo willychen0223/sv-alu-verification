@@ -1,3 +1,29 @@
+class alu_transaction;
+
+  rand logic signed [3:0] a;
+  rand logic signed [3:0] b;
+  rand logic        [1:0] op;
+
+  logic signed [4:0] expected;
+  string name;
+
+  function new(string name = "unnamed");
+    this.name = name;
+  endfunction
+
+  function void calc_expected();
+    case (op)
+      2'b00: expected = a + b;
+      2'b01: expected = a - b;
+      2'b10: expected = ~a;
+      2'b11: expected = |b;
+      default: expected = 5'sd0;
+    endcase
+  endfunction
+
+endclass
+
+
 module tb;
 
   logic clk;
@@ -28,8 +54,6 @@ module tb;
   // Assertions
   // ------------------------------------------------------------
 
-  // Assertion 1:
-  // During reset, output c should be 0.
   property p_reset_c_zero;
     @(posedge clk)
       (!rst_n) |-> (c == 5'sd0);
@@ -38,8 +62,6 @@ module tb;
   assert property (p_reset_c_zero)
     else $error("ASSERTION FAILED: c is not zero during reset");
 
-  // Assertion 2:
-  // rst_n should never be X or Z.
   property p_reset_known;
     @(posedge clk)
       !$isunknown(rst_n);
@@ -48,8 +70,6 @@ module tb;
   assert property (p_reset_known)
     else $error("ASSERTION FAILED: rst_n is X or Z");
 
-  // Assertion 3:
-  // During normal operation, op should never be X or Z.
   property p_op_known;
     @(posedge clk)
       rst_n |-> !$isunknown(op);
@@ -58,8 +78,6 @@ module tb;
   assert property (p_op_known)
     else $error("ASSERTION FAILED: op is X or Z during normal operation");
 
-  // Assertion 4:
-  // During normal operation, output c should not be X or Z.
   property p_c_known;
     @(posedge clk)
       rst_n |-> !$isunknown(c);
@@ -67,6 +85,10 @@ module tb;
 
   assert property (p_c_known)
     else $error("ASSERTION FAILED: c is X or Z during normal operation");
+
+  // ------------------------------------------------------------
+  // Functional Coverage
+  // ------------------------------------------------------------
 
   covergroup alu_cov_cg with function sample(
     input logic signed [3:0] sampled_a,
@@ -108,72 +130,83 @@ module tb;
 
   alu_cov_cg alu_cov;
 
-  function automatic logic signed [4:0] calc_expected(
-    input logic signed [3:0] fa,
-    input logic signed [3:0] fb,
-    input logic        [1:0] fop
-  );
-    begin
-      case (fop)
-        2'b00: calc_expected = fa + fb;
-        2'b01: calc_expected = fa - fb;
-        2'b10: calc_expected = ~fa;
-        2'b11: calc_expected = |fb;
-        default: calc_expected = 5'sd0;
-      endcase
-    end
-  endfunction
+  // ------------------------------------------------------------
+  // Scoreboard
+  // ------------------------------------------------------------
 
   task automatic scoreboard_check(
-    input logic signed [3:0] checked_a,
-    input logic signed [3:0] checked_b,
-    input logic        [1:0] checked_op,
-    input logic signed [4:0] expected,
-    input logic signed [4:0] actual,
-    input string             test_name
+    input alu_transaction tr,
+    input logic signed [4:0] actual
   );
     begin
-      alu_cov.sample(checked_a, checked_b, checked_op, actual);
+      alu_cov.sample(tr.a, tr.b, tr.op, actual);
 
-      if (actual !== expected) begin
+      if (actual !== tr.expected) begin
         fail_count++;
 
         $display("FAIL: %s, a=%0d, b=%0d, op=%b, expected=%0d, actual=%0d",
-                 test_name, checked_a, checked_b, checked_op, expected, actual);
+                 tr.name, tr.a, tr.b, tr.op, tr.expected, actual);
       end else begin
         pass_count++;
 
         $display("PASS: %s, a=%0d, b=%0d, op=%b, result=%0d",
-                 test_name, checked_a, checked_b, checked_op, actual);
+                 tr.name, tr.a, tr.b, tr.op, actual);
       end
     end
   endtask
 
+  // ------------------------------------------------------------
+  // Driver-like task
+  // ------------------------------------------------------------
+
   task automatic apply_and_check(
-    input logic signed [3:0] ta,
-    input logic signed [3:0] tb,
-    input logic        [1:0] top,
-    input string             test_name
+    input alu_transaction tr
   );
-
-    logic signed [4:0] expected;
-
     begin
-      expected = calc_expected(ta, tb, top);
+      tr.calc_expected();
 
       @(posedge clk);
-      a  = ta;
-      b  = tb;
-      op = top;
+      a  = tr.a;
+      b  = tr.b;
+      op = tr.op;
 
       @(posedge clk);
       #1;
 
-      scoreboard_check(ta, tb, top, expected, c, test_name);
+      scoreboard_check(tr, c);
     end
   endtask
 
+  // ------------------------------------------------------------
+  // Helper task for directed tests
+  // ------------------------------------------------------------
+
+  task automatic run_directed_test(
+    input logic signed [3:0] test_a,
+    input logic signed [3:0] test_b,
+    input logic        [1:0] test_op,
+    input string             test_name
+  );
+
+    alu_transaction tr;
+
+    begin
+      tr = new(test_name);
+      tr.a  = test_a;
+      tr.b  = test_b;
+      tr.op = test_op;
+
+      apply_and_check(tr);
+    end
+  endtask
+
+  // ------------------------------------------------------------
+  // Main test
+  // ------------------------------------------------------------
+
   initial begin
+    alu_transaction tr;
+
     $dumpfile("wave.vcd");
     $dumpvars(0, tb);
 
@@ -191,30 +224,37 @@ module tb;
     rst_n = 1;
 
     // Directed tests
-    apply_and_check(4'sd3,    4'sd2,   2'b00, "ADD");
-    apply_and_check(4'sd3,    4'sd5,   2'b01, "SUB");
-    apply_and_check(4'sb0011, 4'sd0,   2'b10, "INV");
-    apply_and_check(4'sd0,    4'b0000, 2'b11, "OR zero");
-    apply_and_check(4'sd0,    4'b0100, 2'b11, "OR nonzero");
+    run_directed_test(4'sd3,    4'sd2,   2'b00, "ADD");
+    run_directed_test(4'sd3,    4'sd5,   2'b01, "SUB");
+    run_directed_test(4'sb0011, 4'sd0,   2'b10, "INV");
+    run_directed_test(4'sd0,    4'b0000, 2'b11, "OR zero");
+    run_directed_test(4'sd0,    4'b0100, 2'b11, "OR nonzero");
 
-    apply_and_check(4'sd7,    4'sd7,   2'b00, "ADD max positive");
-    apply_and_check(-4'sd8,   4'sd7,   2'b01, "SUB negative edge");
+    run_directed_test(4'sd7,    4'sd7,   2'b00, "ADD max positive");
+    run_directed_test(-4'sd8,   4'sd7,   2'b01, "SUB negative edge");
 
     // Extra directed tests for coverage closure
-    apply_and_check(4'sd0,    4'sd3,   2'b00, "ADD a zero");
-    apply_and_check(4'sd0,    4'sd3,   2'b01, "SUB a zero");
+    run_directed_test(4'sd0,    4'sd3,   2'b00, "ADD a zero");
+    run_directed_test(4'sd0,    4'sd3,   2'b01, "SUB a zero");
 
-    // Random tests
+    run_directed_test(-4'sd1,   4'sd3,   2'b00, "ADD a negative");
+    run_directed_test(4'sd3,   -4'sd1,   2'b00, "ADD b negative");
+
+    run_directed_test(4'sd0,    4'sd0,   2'b10, "INV a zero");
+    run_directed_test(-4'sd1,   4'sd0,   2'b10, "INV a negative");
+
+    run_directed_test(4'sd2,    4'sd1,   2'b11, "OR a positive");
+    run_directed_test(-4'sd2,   4'sd1,   2'b11, "OR a negative");
+
+    // Random tests using class randomization
     for (int i = 0; i < 50; i++) begin
-      logic signed [3:0] rand_a;
-      logic signed [3:0] rand_b;
-      logic        [1:0] rand_op;
+      tr = new($sformatf("RANDOM_%0d", i));
 
-      rand_a  = $urandom_range(0, 15);
-      rand_b  = $urandom_range(0, 15);
-      rand_op = $urandom_range(0, 3);
+      if (!tr.randomize()) begin
+        $fatal(1, "Randomization failed");
+      end
 
-      apply_and_check(rand_a, rand_b, rand_op, $sformatf("RANDOM_%0d", i));
+      apply_and_check(tr);
     end
 
     $display("----------------------------------------");
