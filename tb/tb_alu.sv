@@ -21,14 +21,34 @@ module tb;
     forever #5 clk = ~clk;
   end
 
+  function automatic logic signed [4:0] calc_expected(
+    input logic signed [3:0] fa,
+    input logic signed [3:0] fb,
+    input logic        [1:0] fop
+  );
+    begin
+      case (fop)
+        2'b00: calc_expected = fa + fb;
+        2'b01: calc_expected = fa - fb;
+        2'b10: calc_expected = ~fa;
+        2'b11: calc_expected = |fb;
+        default: calc_expected = 5'sd0;
+      endcase
+    end
+  endfunction
+
   task automatic apply_and_check(
     input logic signed [3:0] ta,
     input logic signed [3:0] tb,
     input logic        [1:0] top,
-    input logic signed [4:0] expected,
     input string             test_name
   );
+
+    logic signed [4:0] expected;
+
     begin
+      expected = calc_expected(ta, tb, top);
+
       @(posedge clk);
       a  = ta;
       b  = tb;
@@ -58,14 +78,14 @@ module tb;
     repeat (2) @(posedge clk);
     rst_n = 1;
 
-    apply_and_check(4'sd3,    4'sd2,   2'b00,  5'sd5,    "ADD");
-    apply_and_check(4'sd3,    4'sd5,   2'b01, -5'sd2,    "SUB");
-    apply_and_check(4'sb0011, 4'sd0,   2'b10,  5'b11100, "INV");
-    apply_and_check(4'sd0,    4'b0000, 2'b11,  5'sd0,    "OR zero");
-    apply_and_check(4'sd0,    4'b0100, 2'b11,  5'sd1,    "OR nonzero");
+    apply_and_check(4'sd3,    4'sd2,   2'b00, "ADD");
+    apply_and_check(4'sd3,    4'sd5,   2'b01, "SUB");
+    apply_and_check(4'sb0011, 4'sd0,   2'b10, "INV");
+    apply_and_check(4'sd0,    4'b0000, 2'b11, "OR zero");
+    apply_and_check(4'sd0,    4'b0100, 2'b11, "OR nonzero");
 
-    apply_and_check(4'sd7,    4'sd7,   2'b00,  5'sd14,   "ADD max positive");
-    apply_and_check(-4'sd8,   4'sd7,   2'b01, -5'sd15,   "SUB negative edge");
+    apply_and_check(4'sd7,    4'sd7,   2'b00, "ADD max positive");
+    apply_and_check(-4'sd8,   4'sd7,   2'b01, "SUB negative edge");
 
     $display("All directed tests completed.");
     $finish;
