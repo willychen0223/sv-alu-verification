@@ -7,6 +7,9 @@ module tb;
   logic [1:0] op;
   logic signed [4:0] c;
 
+  int pass_count;
+  int fail_count;
+
   alu dut (
     .clk   (clk),
     .rst_n (rst_n),
@@ -58,10 +61,15 @@ module tb;
       #1;
 
       if (c !== expected) begin
+        fail_count++;
+
         $display("FAIL: %s, a=%0d, b=%0d, op=%b, expected=%0d, actual=%0d",
                  test_name, ta, tb, top, expected, c);
       end else begin
-        $display("PASS: %s", test_name);
+        pass_count++;
+
+        $display("PASS: %s, a=%0d, b=%0d, op=%b, result=%0d",
+                 test_name, ta, tb, top, c);
       end
     end
   endtask
@@ -69,6 +77,9 @@ module tb;
   initial begin
     $dumpfile("wave.vcd");
     $dumpvars(0, tb);
+
+    pass_count = 0;
+    fail_count = 0;
 
     rst_n = 0;
     a = 0;
@@ -78,6 +89,7 @@ module tb;
     repeat (2) @(posedge clk);
     rst_n = 1;
 
+    // Directed tests
     apply_and_check(4'sd3,    4'sd2,   2'b00, "ADD");
     apply_and_check(4'sd3,    4'sd5,   2'b01, "SUB");
     apply_and_check(4'sb0011, 4'sd0,   2'b10, "INV");
@@ -87,7 +99,30 @@ module tb;
     apply_and_check(4'sd7,    4'sd7,   2'b00, "ADD max positive");
     apply_and_check(-4'sd8,   4'sd7,   2'b01, "SUB negative edge");
 
-    $display("All directed tests completed.");
+    // Random tests
+    for (int i = 0; i < 50; i++) begin
+      logic signed [3:0] rand_a;
+      logic signed [3:0] rand_b;
+      logic        [1:0] rand_op;
+
+      rand_a  = $urandom_range(0, 15);
+      rand_b  = $urandom_range(0, 15);
+      rand_op = $urandom_range(0, 3);
+
+      apply_and_check(rand_a, rand_b, rand_op, $sformatf("RANDOM_%0d", i));
+    end
+
+    $display("----------------------------------------");
+    $display("Simulation completed.");
+    $display("PASS count = %0d", pass_count);
+    $display("FAIL count = %0d", fail_count);
+    $display("----------------------------------------");
+
+    if (fail_count == 0)
+      $display("ALL TESTS PASSED");
+    else
+      $display("SOME TESTS FAILED");
+
     $finish;
   end
 
