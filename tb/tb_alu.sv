@@ -5,6 +5,7 @@ class alu_transaction;
   rand logic        [1:0] op;
 
   logic signed [4:0] expected;
+  logic signed [4:0] actual;
   string name;
 
   function new(string name = "unnamed");
@@ -131,49 +132,71 @@ module tb;
   alu_cov_cg alu_cov;
 
   // ------------------------------------------------------------
-  // Scoreboard
+  // Driver-like task
+  // ------------------------------------------------------------
+
+  task automatic driver_task(
+    input alu_transaction tr
+  );
+    begin
+      @(posedge clk);
+      a  = tr.a;
+      b  = tr.b;
+      op = tr.op;
+    end
+  endtask
+
+  // ------------------------------------------------------------
+  // Monitor-like task
+  // ------------------------------------------------------------
+
+  task automatic monitor_task(
+    input alu_transaction tr
+  );
+    begin
+      @(posedge clk);
+      #1;
+      tr.actual = c;
+    end
+  endtask
+
+  // ------------------------------------------------------------
+  // Scoreboard-like task
   // ------------------------------------------------------------
 
   task automatic scoreboard_check(
-    input alu_transaction tr,
-    input logic signed [4:0] actual
+    input alu_transaction tr
   );
     begin
-      alu_cov.sample(tr.a, tr.b, tr.op, actual);
+      alu_cov.sample(tr.a, tr.b, tr.op, tr.actual);
 
-      if (actual !== tr.expected) begin
+      if (tr.actual !== tr.expected) begin
         fail_count++;
 
         $display("FAIL: %s, a=%0d, b=%0d, op=%b, expected=%0d, actual=%0d",
-                 tr.name, tr.a, tr.b, tr.op, tr.expected, actual);
+                 tr.name, tr.a, tr.b, tr.op, tr.expected, tr.actual);
       end else begin
         pass_count++;
 
         $display("PASS: %s, a=%0d, b=%0d, op=%b, result=%0d",
-                 tr.name, tr.a, tr.b, tr.op, actual);
+                 tr.name, tr.a, tr.b, tr.op, tr.actual);
       end
     end
   endtask
 
   // ------------------------------------------------------------
-  // Driver-like task
+  // Main transaction flow
   // ------------------------------------------------------------
 
-  task automatic apply_and_check(
+  task automatic run_transaction(
     input alu_transaction tr
   );
     begin
       tr.calc_expected();
 
-      @(posedge clk);
-      a  = tr.a;
-      b  = tr.b;
-      op = tr.op;
-
-      @(posedge clk);
-      #1;
-
-      scoreboard_check(tr, c);
+      driver_task(tr);
+      monitor_task(tr);
+      scoreboard_check(tr);
     end
   endtask
 
@@ -196,7 +219,7 @@ module tb;
       tr.b  = test_b;
       tr.op = test_op;
 
-      apply_and_check(tr);
+      run_transaction(tr);
     end
   endtask
 
@@ -254,7 +277,7 @@ module tb;
         $fatal(1, "Randomization failed");
       end
 
-      apply_and_check(tr);
+      run_transaction(tr);
     end
 
     $display("----------------------------------------");
