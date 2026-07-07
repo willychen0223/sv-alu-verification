@@ -15,7 +15,7 @@ Place the files as follows:
 - Design pane: `rtl/alu.sv`
 - Testbench pane: `tb/tb_alu.sv`
 
-## Expected Output
+## Example Simulation Output
 
 ```text
 PASS: ADD
@@ -23,4 +23,6 @@ PASS: SUB
 PASS: INV
 PASS: OR zero
 PASS: OR nonzero
+PASS: ADD max positive
+PASS: SUB negative edge
 All directed tests completed.
