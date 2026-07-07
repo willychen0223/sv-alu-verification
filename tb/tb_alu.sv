@@ -40,6 +40,29 @@ module tb;
     end
   endfunction
 
+  task automatic scoreboard_check(
+    input logic signed [3:0] checked_a,
+    input logic signed [3:0] checked_b,
+    input logic        [1:0] checked_op,
+    input logic signed [4:0] expected,
+    input logic signed [4:0] actual,
+    input string             test_name
+  );
+    begin
+      if (actual !== expected) begin
+        fail_count++;
+
+        $display("FAIL: %s, a=%0d, b=%0d, op=%b, expected=%0d, actual=%0d",
+                 test_name, checked_a, checked_b, checked_op, expected, actual);
+      end else begin
+        pass_count++;
+
+        $display("PASS: %s, a=%0d, b=%0d, op=%b, result=%0d",
+                 test_name, checked_a, checked_b, checked_op, actual);
+      end
+    end
+  endtask
+
   task automatic apply_and_check(
     input logic signed [3:0] ta,
     input logic signed [3:0] tb,
@@ -60,17 +83,7 @@ module tb;
       @(posedge clk);
       #1;
 
-      if (c !== expected) begin
-        fail_count++;
-
-        $display("FAIL: %s, a=%0d, b=%0d, op=%b, expected=%0d, actual=%0d",
-                 test_name, ta, tb, top, expected, c);
-      end else begin
-        pass_count++;
-
-        $display("PASS: %s, a=%0d, b=%0d, op=%b, result=%0d",
-                 test_name, ta, tb, top, c);
-      end
+      scoreboard_check(ta, tb, top, expected, c, test_name);
     end
   endtask
 
