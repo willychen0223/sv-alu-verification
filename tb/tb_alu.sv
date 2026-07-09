@@ -1,5 +1,6 @@
-class alu_transaction;
+class alu_transaction; //設計圖 模板
 
+//資料 
   rand logic signed [3:0] a;
   rand logic signed [3:0] b;
   rand logic        [1:0] op;
@@ -8,11 +9,17 @@ class alu_transaction;
   logic signed [4:0] actual;
   string name;
 
+//Constructor建構子
   function new(string name = "unnamed");
     this.name = name;
   endfunction
 
-  function void calc_expected();
+//function new(string input_name = "unnamed");
+//  this.name = input_name;
+//endfunction
+
+//動作
+  function void calc_expected(); //這個class有自己算expected的功能
     case (op)
       2'b00: expected = a + b;
       2'b01: expected = a - b;
@@ -57,9 +64,11 @@ module tb;
 
   property p_reset_c_zero;
     @(posedge clk)
-      (!rst_n) |-> (c == 5'sd0);
+      (!rst_n) |-> (c == 5'sd0); 
   endproperty
-
+   //只有在rst_n是0的時候，斷言(implication)才會執行，然後去檢查c是不是0。如果c是0的話，斷言就會通過；如果c不是0的話，斷言就會失敗，並且會執行else語句，印出錯誤信息。
+   //rst_n是1的時候，斷言不會執行，因為前提條件(!rst_n)不成立，所以不會檢查c的值。所以也就不會跳到else
+   //A |-> B (記住:如果 A 成立，B 必須成立。如果 A 不成立，這次 assertion 直接 pass。)
   assert property (p_reset_c_zero)
     else $error("ASSERTION FAILED: c is not zero during reset");
 
@@ -67,7 +76,7 @@ module tb;
     @(posedge clk)
       !$isunknown(rst_n);
   endproperty
-
+    //如果 $isunknown(rst_n) 是 1，代表 rst_n 是 X/Z。因為前面有 !，所以 !$isunknown(rst_n) 會變成 0。assertion 失敗，就會跳到 else。
   assert property (p_reset_known)
     else $error("ASSERTION FAILED: rst_n is X or Z");
 
@@ -90,7 +99,9 @@ module tb;
   // ------------------------------------------------------------
   // Functional Coverage
   // ------------------------------------------------------------
-
+//spec 裡重要的功能、狀態、corner case、組合情境，有沒有被測到？
+//Functional coverage = 把 spec 變成一張「測試完整度 checklist」。
+//有點像class，這裡是設計圖。必須先命名，然後在去生成物件
   covergroup alu_cov_cg with function sample(
     input logic signed [3:0] sampled_a,
     input logic signed [3:0] sampled_b,
@@ -129,12 +140,12 @@ module tb;
 
   endgroup
 
-  alu_cov_cg alu_cov;
+  alu_cov_cg alu_cov; //命名：alu_cov，型別：alu_cov_cg。這裡是宣告一個物件，還沒生成物件。在main那裏才建立object，alu_cov = new();
 
   // ------------------------------------------------------------
   // Driver-like task
   // ------------------------------------------------------------
-
+//把東西塞到DUT裡面去
   task automatic driver_task(
     input alu_transaction tr
   );
@@ -149,13 +160,13 @@ module tb;
   // ------------------------------------------------------------
   // Monitor-like task
   // ------------------------------------------------------------
-
+//把DUT的結果抓出來，塞到transaction裡面去
   task automatic monitor_task(
     input alu_transaction tr
   );
     begin
       @(posedge clk);
-      #1;
+      #1; //等DUT算好
       tr.actual = c;
     end
   endtask
@@ -168,7 +179,7 @@ module tb;
     input alu_transaction tr
   );
     begin
-      alu_cov.sample(tr.a, tr.b, tr.op, tr.actual);
+      alu_cov.sample(tr.a, tr.b, tr.op, tr.actual); //算functional coverage 
 
       if (tr.actual !== tr.expected) begin
         fail_count++;
@@ -189,21 +200,22 @@ module tb;
   // ------------------------------------------------------------
 
   task automatic run_transaction(
-    input alu_transaction tr
+    input alu_transaction item1
   );
-    begin
-      tr.calc_expected();
+    //這裡面的是照順序執行，執行完一個才會做下一個
+    begin 
+      item1.calc_expected();
 
-      driver_task(tr);
-      monitor_task(tr);
-      scoreboard_check(tr);
+      driver_task(item1);
+      monitor_task(item1);
+      scoreboard_check(item1);
     end
   endtask
 
   // ------------------------------------------------------------
   // Helper task for directed tests
   // ------------------------------------------------------------
-
+  //run_directed_test(4'sd3,    4'sd2,   2'b00, "ADD");
   task automatic run_directed_test(
     input logic signed [3:0] test_a,
     input logic signed [3:0] test_b,
@@ -211,10 +223,10 @@ module tb;
     input string             test_name
   );
 
-    alu_transaction tr;
+    alu_transaction tr; // 宣告：我要一個 transaction 變數，名字叫 tr。 注意，在這個時候object還沒被產生
 
     begin
-      tr = new(test_name);
+      tr = new(test_name);  //object這裡才被建立
       tr.a  = test_a;
       tr.b  = test_b;
       tr.op = test_op;
@@ -228,7 +240,7 @@ module tb;
   // ------------------------------------------------------------
 
   initial begin
-    alu_transaction tr;
+
 
     $dumpfile("wave.vcd");
     $dumpvars(0, tb);
@@ -271,9 +283,10 @@ module tb;
 
     // Random tests using class randomization
     for (int i = 0; i < 50; i++) begin
+      alu_transaction tr;
       tr = new($sformatf("RANDOM_%0d", i));
 
-      if (!tr.randomize()) begin
+      if (!tr.randomize()) begin  //呼叫randomize()，如果randomize()回傳0，代表randomization失敗
         $fatal(1, "Randomization failed");
       end
 
