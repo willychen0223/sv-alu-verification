@@ -466,3 +466,298 @@ Planned next steps:
 2. Add a SystemVerilog interface to group DUT signals.
 3. Refactor the testbench toward a more UVM-like structure.
 4. Build a FIFO verification project using the same methodology.
+
+---
+---
+
+## Day 12 Update: Generator + Mailbox
+
+In Day 12, the random test flow was refactored to use a generator, a typed mailbox, and a driver-from-mailbox task.
+
+The goal of this update is to make the testbench closer to a real UVM-style verification architecture.
+
+---
+
+## Why Generator + Mailbox?
+
+In the Day 11 testbench, the main test directly created random transactions and directly called `run_transaction(tr)`.
+
+Day 11 random flow:
+
+```text
+main test
+  ↓
+create transaction
+  ↓
+randomize transaction
+  ↓
+run_transaction(tr)
+```
+
+In Day 12, the random stimulus generation and the driver behavior are separated.
+
+Day 12 random flow:
+
+```text
+generator_task
+  ↓
+put transaction into mailbox
+  ↓
+driver_from_mailbox_task
+  ↓
+get transaction from mailbox
+  ↓
+driver_task
+  ↓
+monitor_task
+  ↓
+scoreboard_check
+```
+
+This is closer to the UVM idea:
+
+```text
+sequence
+  ↓
+sequencer
+  ↓
+driver
+```
+
+In this simplified testbench:
+
+| Day 12 Component | UVM-like Meaning |
+|---|---|
+| `generator_task()` | sequence-like stimulus generator |
+| `mailbox` | simplified sequencer/channel |
+| `driver_from_mailbox_task()` | driver control loop |
+| `driver_task()` | drives DUT inputs |
+| `monitor_task()` | samples DUT output |
+| `scoreboard_check()` | checks actual vs expected |
+
+---
+
+## Typed Mailbox
+
+A typed mailbox was added between the generator and driver.
+
+```systemverilog
+mailbox #(alu_transaction) gen2drv_mbx;
+```
+
+This means the mailbox is designed to transfer `alu_transaction` objects.
+
+The mailbox is created in the main test:
+
+```systemverilog
+gen2drv_mbx = new(1);
+```
+
+The `1` means the mailbox capacity is limited to one transaction.
+
+This creates a more synchronized flow:
+
+```text
+generator puts one transaction
+driver gets one transaction
+generator can then put the next transaction
+```
+
+If the mailbox were created with:
+
+```systemverilog
+gen2drv_mbx = new();
+```
+
+then it would have unlimited capacity, and the generator could put all random transactions into the mailbox before the driver starts processing them.
+
+Using `new(1)` makes the generator and driver behavior easier to observe in the simulation log.
+
+---
+
+## Generator Task
+
+The generator is responsible for creating random transactions.
+
+```systemverilog
+task automatic generator_task(
+  input int num_tests
+);
+
+  alu_transaction tr;
+
+  begin
+    for (int i = 0; i < num_tests; i++) begin
+      tr = new($sformatf("GEN_RANDOM_%0d", i));
+
+      if (!tr.randomize()) begin
+        $fatal(1, "Randomization failed");
+      end
+
+      tr.calc_expected();
+
+      gen2drv_mbx.put(tr);
+
+      $display("GEN: put %s into mailbox", tr.name);
+    end
+  end
+
+endtask
+```
+
+The generator does not drive the DUT directly.
+
+Its job is only to:
+
+1. Create a transaction
+2. Randomize `a`, `b`, and `op`
+3. Calculate the expected result
+4. Put the transaction into the mailbox
+
+Key line:
+
+```systemverilog
+gen2drv_mbx.put(tr);
+```
+
+This sends the transaction from the generator to the mailbox.
+
+---
+
+## Driver From Mailbox Task
+
+The driver-from-mailbox task gets transactions from the mailbox and runs them through the existing driver, monitor, and scoreboard flow.
+
+```systemverilog
+task automatic driver_from_mailbox_task(
+  input int num_tests
+);
+
+  alu_transaction tr;
+
+  begin
+    for (int i = 0; i < num_tests; i++) begin
+      gen2drv_mbx.get(tr);
+
+      $display("DRV: got %s from mailbox", tr.name);
+
+      driver_task(tr);
+      monitor_task(tr);
+      scoreboard_check(tr);
+    end
+  end
+
+endtask
+```
+
+Key line:
+
+```systemverilog
+gen2drv_mbx.get(tr);
+```
+
+This gets one transaction from the mailbox and stores it in `tr`.
+
+Then the transaction is processed:
+
+```text
+driver_task(tr)
+  ↓
+monitor_task(tr)
+  ↓
+scoreboard_check(tr)
+```
+
+---
+
+## Fork Join
+
+The generator and driver-from-mailbox tasks are launched in parallel using `fork...join`.
+
+```systemverilog
+fork
+  generator_task(50);
+  driver_from_mailbox_task(50);
+join
+```
+
+This means both tasks start running at the same time.
+
+The generator produces transactions, and the driver consumes transactions from the mailbox.
+
+---
+
+## Simulation Log Behavior
+
+With `gen2drv_mbx = new(1);`, the log shows the generator and driver working together.
+
+Example:
+
+```text
+GEN: put GEN_RANDOM_0 into mailbox
+DRV: got GEN_RANDOM_0 from mailbox
+GEN: put GEN_RANDOM_1 into mailbox
+PASS: GEN_RANDOM_0
+DRV: got GEN_RANDOM_1 from mailbox
+GEN: put GEN_RANDOM_2 into mailbox
+PASS: GEN_RANDOM_1
+```
+
+This behavior happens because:
+
+- The mailbox can only hold one transaction.
+- After the driver gets one transaction, the mailbox becomes empty.
+- The generator can then put the next transaction.
+- The driver still needs clock cycles to drive, monitor, and check the result.
+
+This explains why `GEN_RANDOM_1` may appear before `PASS: GEN_RANDOM_0`.
+
+---
+
+## Day 12 Simulation Result
+
+The testbench passed successfully after adding the generator and mailbox flow.
+
+```text
+PASS count = 65
+FAIL count = 0
+Functional coverage = 100.00%
+ALL TESTS PASSED
+```
+
+The 65 tests include:
+
+- 15 directed tests
+- 50 random tests generated through the mailbox flow
+
+---
+
+## What I Learned in Day 12
+
+Through this update, I learned:
+
+- A generator creates transactions but does not directly drive the DUT.
+- A mailbox can be used to pass transaction objects between testbench components.
+- `mailbox #(alu_transaction)` creates a typed mailbox for `alu_transaction` objects.
+- `put(tr)` sends a transaction into the mailbox.
+- `get(tr)` receives a transaction from the mailbox.
+- `new()` creates an unlimited-capacity mailbox.
+- `new(1)` creates a mailbox that can hold only one transaction.
+- `fork...join` allows the generator and driver to run in parallel.
+- Even with `fork...join`, log messages may not alternate perfectly because different tasks consume different simulation time.
+- This structure is closer to how UVM separates stimulus generation from DUT driving.
+
+---
+
+## Day 12 Key Takeaway
+
+The main idea of Day 12 is:
+
+```text
+Generator creates transactions.
+Mailbox transfers transactions.
+Driver gets transactions and drives the DUT.
+```
+
+This is an important step toward understanding real UVM verification architecture.
+
