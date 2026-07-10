@@ -44,6 +44,14 @@ module tb;
   int pass_count;
   int fail_count;
 
+  // Day 12 : mailbox between geneator and driver
+  mailbox #(alu_transaction) gen2drv_mbx;
+
+//gen2drv_mbx 是一個信箱。
+//它專門傳 alu_transaction。
+//generator 把 tr 放進去。
+//driver 從裡面拿 tr。
+
   alu dut (
     .clk   (clk),
     .rst_n (rst_n),
@@ -211,6 +219,59 @@ module tb;
       scoreboard_check(item1);
     end
   endtask
+  
+  // ------------------------------------------------------------
+// Day 12: Generator task
+// ------------------------------------------------------------
+
+task automatic generator_task(
+  input int num_tests
+);
+
+  alu_transaction tr;
+
+  begin
+    for (int i = 0; i < num_tests; i++) begin
+      tr = new($sformatf("GEN_RANDOM_%0d", i));
+
+      if (!tr.randomize()) begin
+        $fatal(1, "Randomization failed");
+      end
+
+      tr.calc_expected();
+
+      gen2drv_mbx.put(tr);
+
+      $display("GEN: put %s into mailbox", tr.name);
+    end
+  end
+
+endtask
+
+// ------------------------------------------------------------
+// Day 12: Driver gets transactions from mailbox
+// ------------------------------------------------------------
+
+task automatic driver_from_mailbox_task(
+  input int num_tests
+);
+
+  alu_transaction tr;
+
+  begin
+    for (int i = 0; i < num_tests; i++) begin
+      gen2drv_mbx.get(tr);
+
+      $display("DRV: got %s from mailbox", tr.name);
+
+      driver_task(tr);
+      monitor_task(tr);
+      scoreboard_check(tr);
+    end
+  end
+
+endtask
+
 
   // ------------------------------------------------------------
   // Helper task for directed tests
@@ -281,17 +342,23 @@ module tb;
     run_directed_test(4'sd2,    4'sd1,   2'b11, "OR a positive");
     run_directed_test(-4'sd2,   4'sd1,   2'b11, "OR a negative");
 
-    // Random tests using class randomization
-    for (int i = 0; i < 50; i++) begin
-      alu_transaction tr;
-      tr = new($sformatf("RANDOM_%0d", i));
+    // Day 12: Random tests using generator + mailbox
+    gen2drv_mbx = new(1);  //信箱的容量是1，代表一次只能放一個transaction。可以透過這個了解put get怎麼跟mailbox互動
 
-      if (!tr.randomize()) begin  //呼叫randomize()，如果randomize()回傳0，代表randomization失敗
-        $fatal(1, "Randomization failed");
-      end
+    fork //fork join裡面的東西平行一起處理。begin end裡面的東西照順序執行
+    //put = 放進 mailbox
+    //get = 從 mailbox 拿出來
 
-      run_transaction(tr);
-    end
+    //如果 mailbox 空的，get 會等。
+    //fork...join 讓 generator 和 driver 同時跑。
+    //所以 generator 一邊放，driver 一邊拿。
+      generator_task(50);
+      driver_from_mailbox_task(50);
+    join
+
+
+
+
 
     $display("----------------------------------------");
     $display("Simulation completed.");
