@@ -31,8 +31,7 @@ class alu_transaction; //設計圖 模板
 
 endclass
 
-
-module tb;
+interface alu_if;
 
   logic clk;
   logic rst_n;
@@ -40,6 +39,20 @@ module tb;
   logic signed [3:0] b;
   logic [1:0] op;
   logic signed [4:0] c;
+
+endinterface
+
+module tb;
+  //先建立testbench裡面的訊號，然後再把訊號接到DUT裡面去
+  //logic clk;
+  //logic rst_n;
+  //logic signed [3:0] a;
+  //logic signed [3:0] b;
+  //logic [1:0] op;
+  //logic signed [4:0] c;
+
+  alu_if intf();
+  //alu_if:型別 ，intf名稱
 
   int pass_count;
   int fail_count;
@@ -53,17 +66,17 @@ module tb;
 //driver 從裡面拿 tr。
 
   alu dut (
-    .clk   (clk),
-    .rst_n (rst_n),
-    .a     (a),
-    .b     (b),
-    .op    (op),
-    .c     (c)
+    .clk   (intf.clk),
+    .rst_n (intf.rst_n),
+    .a     (intf.a),
+    .b     (intf.b),
+    .op    (intf.op),
+    .c     (intf.c)
   );
 
   initial begin
-    clk = 0;
-    forever #5 clk = ~clk;
+    intf.clk = 0;
+    forever #5 intf.clk = ~intf.clk;
   end
 
   // ------------------------------------------------------------
@@ -71,8 +84,8 @@ module tb;
   // ------------------------------------------------------------
 
   property p_reset_c_zero;
-    @(posedge clk)
-      (!rst_n) |-> (c == 5'sd0); 
+    @(posedge intf.clk)
+      (!intf.rst_n) |-> (intf.c == 5'sd0); 
   endproperty
    //只有在rst_n是0的時候，斷言(implication)才會執行，然後去檢查c是不是0。如果c是0的話，斷言就會通過；如果c不是0的話，斷言就會失敗，並且會執行else語句，印出錯誤信息。
    //rst_n是1的時候，斷言不會執行，因為前提條件(!rst_n)不成立，所以不會檢查c的值。所以也就不會跳到else
@@ -81,24 +94,24 @@ module tb;
     else $error("ASSERTION FAILED: c is not zero during reset");
 
   property p_reset_known;
-    @(posedge clk)
-      !$isunknown(rst_n);
+    @(posedge intf.clk)
+      !$isunknown(intf.rst_n);
   endproperty
     //如果 $isunknown(rst_n) 是 1，代表 rst_n 是 X/Z。因為前面有 !，所以 !$isunknown(rst_n) 會變成 0。assertion 失敗，就會跳到 else。
   assert property (p_reset_known)
     else $error("ASSERTION FAILED: rst_n is X or Z");
 
   property p_op_known;
-    @(posedge clk)
-      rst_n |-> !$isunknown(op);
+    @(posedge intf.clk)
+      intf.rst_n |-> !$isunknown(intf.op);
   endproperty
 
   assert property (p_op_known)
     else $error("ASSERTION FAILED: op is X or Z during normal operation");
 
   property p_c_known;
-    @(posedge clk)
-      rst_n |-> !$isunknown(c);
+    @(posedge intf.clk)
+      intf.rst_n |-> !$isunknown(intf.c);
   endproperty
 
   assert property (p_c_known)
@@ -158,10 +171,10 @@ module tb;
     input alu_transaction tr
   );
     begin
-      @(posedge clk);
-      a  = tr.a;
-      b  = tr.b;
-      op = tr.op;
+      @(posedge intf.clk);
+      intf.a  = tr.a;
+      intf.b  = tr.b;
+      intf.op = tr.op;
     end
   endtask
 
@@ -173,9 +186,9 @@ module tb;
     input alu_transaction tr
   );
     begin
-      @(posedge clk);
+      @(posedge intf.clk);
       #1; //等DUT算好
-      tr.actual = c;
+      tr.actual = intf.c;
     end
   endtask
 
@@ -311,13 +324,13 @@ endtask
     pass_count = 0;
     fail_count = 0;
 
-    rst_n = 0;
-    a = 0;
-    b = 0;
-    op = 0;
+    intf.rst_n = 0;
+    intf.a = 0;
+    intf.b = 0;
+    intf.op = 0;
 
-    repeat (2) @(posedge clk);
-    rst_n = 1;
+    repeat (2) @(posedge intf.clk);
+    intf.rst_n = 1;
 
     // Directed tests
     run_directed_test(4'sd3,    4'sd2,   2'b00, "ADD");
