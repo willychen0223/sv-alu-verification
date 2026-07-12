@@ -19,6 +19,26 @@ The main goal is to practice digital verification concepts step by step, includi
 - UVM-style testbench architecture
 
 ---
+### Day 13
+
+完成 SystemVerilog interface 整合：
+
+- 建立 `alu_if`
+- 集中管理 `clk`、`rst_n`、`a`、`b`、`op`、`c`
+- 透過 interface 連接 DUT
+- Driver 經由 interface 驅動輸入
+- Monitor 經由 interface讀取輸出
+- Assertions 與初始化改用 interface 訊號
+
+### Day 14 
+
+完成 modport 與 virtual interface：
+
+- 建立 `DRIVER` 與 `MONITOR` modport
+- 限制 Driver 與 Monitor 的訊號存取方向
+- Driver 透過 `virtual alu_if.DRIVER` 驅動輸入
+- Monitor 透過 `virtual alu_if.MONITOR` 讀取輸出
+- 理解 class handle、interface instance 與 virtual interface handle
 
 ## DUT: ALU
 
