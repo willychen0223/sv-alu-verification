@@ -18,7 +18,7 @@ class alu_transaction; //設計圖 模板
 //  this.name = input_name;
 //endfunction
 
-//動作
+//動作 Method
   function void calc_expected(); //這個class有自己算expected的功能
     case (op)
       2'b00: expected = a + b;
@@ -39,8 +39,31 @@ interface alu_if;
   logic signed [3:0] b;
   logic [1:0] op;
   logic signed [4:0] c;
+    //modport 可以理解成 interface 的權限與方向說明書。
+    modport DRIVER (   //DRIVER可以寫rst_n, a, b, op。Driver是modport的名稱
+    input  clk,
+    input  c,
+    output rst_n,
+    output a,
+    output b,
+    output op
+  );
+  //當某個元件透過 DRIVER 這個視角使用 interface 時，
+  //它可以驅動 rst_n、a、b、op，並讀取 clk、c。
+
+    modport MONITOR (
+    input clk,
+    input rst_n,
+    input a,
+    input b,
+    input op,
+    input c
+  );
 
 endinterface
+
+  
+  
 
 module tb;
   //先建立testbench裡面的訊號，然後再把訊號接到DUT裡面去
@@ -51,8 +74,14 @@ module tb;
   //logic [1:0] op;
   //logic signed [4:0] c;
 
-  alu_if intf();
+  alu_if intf(); //
   //alu_if:型別 ，intf名稱
+  //執行這行 interface instance 就已經建立完成。
+  //為什麼不需要 new()？
+  //因為 interface 和 module 都屬於靜態結構。模擬器會在模擬開始前的 elaboration 階段建立它們。
+  //module / interface instance：不用 new()
+  //class object：需要 new()
+  //virtual interface：只是指標，不用 new()
 
   int pass_count;
   int fail_count;
@@ -168,13 +197,14 @@ module tb;
   // ------------------------------------------------------------
 //把東西塞到DUT裡面去
   task automatic driver_task(
+    virtual alu_if.DRIVER vif,
     input alu_transaction tr
   );
     begin
-      @(posedge intf.clk);
-      intf.a  = tr.a;
-      intf.b  = tr.b;
-      intf.op = tr.op;
+      @(posedge vif.clk);
+      vif.a  = tr.a;
+      vif.b  = tr.b;
+      vif.op = tr.op;
     end
   endtask
 
@@ -183,12 +213,13 @@ module tb;
   // ------------------------------------------------------------
 //把DUT的結果抓出來，塞到transaction裡面去
   task automatic monitor_task(
+    virtual alu_if.MONITOR vif,  //這裡的vif是task內的區域變數
     input alu_transaction tr
   );
     begin
-      @(posedge intf.clk);
+      @(posedge vif.clk);
       #1; //等DUT算好
-      tr.actual = intf.c;
+      tr.actual = vif.c;
     end
   endtask
 
@@ -227,8 +258,8 @@ module tb;
     begin 
       item1.calc_expected();
 
-      driver_task(item1);
-      monitor_task(item1);
+      driver_task(intf,item1);
+      monitor_task(intf,item1);
       scoreboard_check(item1);
     end
   endtask
@@ -277,8 +308,8 @@ task automatic driver_from_mailbox_task(
 
       $display("DRV: got %s from mailbox", tr.name);
 
-      driver_task(tr);
-      monitor_task(tr);
+      driver_task(intf,tr);
+      monitor_task(intf,tr);
       scoreboard_check(tr);
     end
   end
@@ -296,7 +327,10 @@ endtask
     input logic        [1:0] test_op,
     input string             test_name
   );
-
+    //tr叫做handle，可以想像成住家地址
+    //alu_transaction是Class型別
+    //new()建立object
+    //tr.a，透過handle存取object裡的a
     alu_transaction tr; // 宣告：我要一個 transaction 變數，名字叫 tr。 注意，在這個時候object還沒被產生
 
     begin
