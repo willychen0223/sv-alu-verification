@@ -36,12 +36,53 @@ class alu_scoreboard;
   int pass_count;
   int fail_count;
 
+  covergroup cov with function sample(
+    input logic signed [3:0] sampled_a,
+    input logic signed [3:0] sampled_b,
+    input logic        [1:0] sampled_op,
+    input logic signed [4:0] sampled_result
+  );
+
+    option.per_instance = 1;
+
+    cp_op: coverpoint sampled_op {
+      bins add    = {2'b00};
+      bins sub    = {2'b01};
+      bins inv    = {2'b10};
+      bins red_or = {2'b11};
+    }
+
+    cp_a: coverpoint sampled_a {
+      bins negative = {[-8:-1]};
+      bins zero     = {0};
+      bins positive = {[1:7]};
+    }
+
+    cp_b: coverpoint sampled_b {
+      bins negative = {[-8:-1]};
+      bins zero     = {0};
+      bins positive = {[1:7]};
+    }
+
+    cp_result: coverpoint sampled_result {
+      bins negative = {[-16:-1]};
+      bins zero     = {0};
+      bins positive = {[1:15]};
+    }
+
+    cross_op_a: cross cp_op, cp_a;
+
+  endgroup
+
   function new();
     pass_count = 0;
     fail_count = 0;
+    cov = new();
   endfunction
 
   function void check(input alu_transaction tr);
+
+    cov.sample(tr.a, tr.b, tr.op, tr.actual);
 
     if (tr.actual !== tr.expected) begin
       fail_count++;
@@ -60,6 +101,10 @@ class alu_scoreboard;
       );
     end
 
+  endfunction
+
+  function real get_coverage();
+    return cov.get_inst_coverage();
   endfunction
 
 endclass
@@ -133,6 +178,25 @@ interface alu_if;
 
 endinterface
 
+class alu_monitor;
+
+  virtual alu_if.MONITOR vif;
+
+  function new(
+    virtual alu_if.MONITOR vif
+  );
+    this.vif = vif;
+  endfunction
+
+  task sample(input alu_transaction tr);
+
+    @(vif.monitor_cb);
+    tr.actual = vif.monitor_cb.c;
+
+  endtask
+
+endclass
+
 class alu_driver;
 
   mailbox #(alu_transaction) gen2drv_mbx;
@@ -170,6 +234,97 @@ class alu_driver;
   endtask
 
 endclass
+
+class alu_env;
+
+  mailbox #(alu_transaction) gen2drv_mbx;
+
+  alu_generator  gen;
+  alu_driver     drv;
+  alu_monitor    mon;
+  alu_scoreboard sb;
+
+  function new(
+    virtual alu_if.DRIVER  drv_vif,
+    virtual alu_if.MONITOR mon_vif
+  );
+
+    gen2drv_mbx = new(1);
+
+    gen = new(gen2drv_mbx);
+    drv = new(gen2drv_mbx, drv_vif);
+    mon = new(mon_vif);
+    sb  = new();
+
+  endfunction
+
+  task run_transaction(input alu_transaction tr);
+    tr.calc_expected();
+
+    drv.drive(tr);
+    mon.sample(tr);
+    sb.check(tr);
+  endtask
+
+  task run_directed_test(
+    input logic signed [3:0] test_a,
+    input logic signed [3:0] test_b,
+    input logic        [1:0] test_op,
+    input string             test_name
+  );
+    alu_transaction tr;
+
+    tr = new(test_name);
+    tr.a  = test_a;
+    tr.b  = test_b;
+    tr.op = test_op;
+
+    run_transaction(tr);
+  endtask
+
+  task run_directed_suite();
+    run_directed_test(4'sd3,    4'sd2,   2'b00, "ADD");
+    run_directed_test(4'sd3,    4'sd5,   2'b01, "SUB");
+    run_directed_test(4'sb0011, 4'sd0,   2'b10, "INV");
+    run_directed_test(4'sd0,    4'b0000, 2'b11, "OR zero");
+    run_directed_test(4'sd0,    4'b0100, 2'b11, "OR nonzero");
+
+    run_directed_test(4'sd7,    4'sd7,   2'b00, "ADD max positive");
+    run_directed_test(-4'sd8,   4'sd7,   2'b01, "SUB negative edge");
+
+    run_directed_test(4'sd0,    4'sd3,   2'b00, "ADD a zero");
+    run_directed_test(4'sd0,    4'sd3,   2'b01, "SUB a zero");
+    run_directed_test(-4'sd1,   4'sd3,   2'b00, "ADD a negative");
+    run_directed_test(4'sd3,   -4'sd1,   2'b00, "ADD b negative");
+
+    run_directed_test(4'sd0,    4'sd0,   2'b10, "INV a zero");
+    run_directed_test(-4'sd1,   4'sd0,   2'b10, "INV a negative");
+    run_directed_test(4'sd2,    4'sd1,   2'b11, "OR a positive");
+    run_directed_test(-4'sd2,   4'sd1,   2'b11, "OR a negative");
+  endtask
+
+  task process_transactions(input int num_tests);
+    alu_transaction tr;
+
+    for (int i = 0; i < num_tests; i++) begin
+      gen2drv_mbx.get(tr);
+
+      $display("DRV: got %s from mailbox", tr.name);
+
+      drv.drive(tr);
+      mon.sample(tr);
+      sb.check(tr);
+    end
+  endtask
+
+  task run(input int num_tests);
+    fork
+      gen.run(num_tests);
+      process_transactions(num_tests);
+    join
+  endtask
+
+endclass
   
 
 module tb;
@@ -189,15 +344,8 @@ module tb;
   //module / interface instance：不用 new()
   //class object：需要 new()
   //virtual interface：只是指標，不用 new()
-
-  //int pass_count;
-  //int fail_count;
-
-  // Day 12 : mailbox between geneator and driver
-  mailbox #(alu_transaction) gen2drv_mbx;
-  alu_generator gen;
-  alu_driver drv;
-  alu_scoreboard sb;
+  alu_env env;
+  // Environment owns the mailbox and all verification components.
 
 //gen2drv_mbx 是一個信箱。
 //它專門傳 alu_transaction。
@@ -257,194 +405,6 @@ module tb;
     else $error("ASSERTION FAILED: c is X or Z during normal operation");
 
   // ------------------------------------------------------------
-  // Functional Coverage
-  // ------------------------------------------------------------
-//spec 裡重要的功能、狀態、corner case、組合情境，有沒有被測到？
-//Functional coverage = 把 spec 變成一張「測試完整度 checklist」。
-//有點像class，這裡是設計圖。必須先命名，然後在去生成物件
-  covergroup alu_cov_cg with function sample(
-    input logic signed [3:0] sampled_a,
-    input logic signed [3:0] sampled_b,
-    input logic        [1:0] sampled_op,
-    input logic signed [4:0] sampled_result
-  );
-
-    option.per_instance = 1;
-
-    cp_op: coverpoint sampled_op {
-      bins add    = {2'b00};
-      bins sub    = {2'b01};
-      bins inv    = {2'b10};
-      bins red_or = {2'b11};
-    }
-
-    cp_a: coverpoint sampled_a {
-      bins negative = {[-8:-1]};
-      bins zero     = {0};
-      bins positive = {[1:7]};
-    }
-
-    cp_b: coverpoint sampled_b {
-      bins negative = {[-8:-1]};
-      bins zero     = {0};
-      bins positive = {[1:7]};
-    }
-
-    cp_result: coverpoint sampled_result {
-      bins negative = {[-16:-1]};
-      bins zero     = {0};
-      bins positive = {[1:15]};
-    }
-
-    cross_op_a: cross cp_op, cp_a;
-
-  endgroup
-
-  alu_cov_cg alu_cov; //命名：alu_cov，型別：alu_cov_cg。這裡是宣告一個物件，還沒生成物件。在main那裏才建立object，alu_cov = new();
-
-  // ------------------------------------------------------------
-  // Driver-like task
-  // ------------------------------------------------------------
-//把東西塞到DUT裡面去
-  task automatic driver_task(
-    virtual alu_if.DRIVER vif,
-    input alu_transaction tr
-  );
-    begin
-      @(vif.driver_cb);
-      vif.driver_cb.a  <= tr.a;
-      vif.driver_cb.b  <= tr.b;
-      vif.driver_cb.op <= tr.op;
-    end
-  endtask
-
-  // ------------------------------------------------------------
-  // Monitor-like task
-  // ------------------------------------------------------------
-//把DUT的結果抓出來，塞到transaction裡面去
-  task automatic monitor_task(
-    virtual alu_if.MONITOR vif,  //這裡的vif是task內的區域變數
-    input alu_transaction tr
-  );
-    begin
-      @(vif.monitor_cb);
-      tr.actual = vif.monitor_cb.c;
-    end
-  endtask
-
-  // ------------------------------------------------------------
-  // Scoreboard-like task
-  // ------------------------------------------------------------
-
-  task automatic scoreboard_check(
-    input alu_transaction tr
-  );
-    begin
-      alu_cov.sample(tr.a, tr.b, tr.op, tr.actual); //算functional coverage 
-
-      sb.check(tr);
-    end
-  endtask
-
-  // ------------------------------------------------------------
-  // Main transaction flow
-  // ------------------------------------------------------------
-
-  task automatic run_transaction(
-    input alu_transaction item1
-  );
-    //這裡面的是照順序執行，執行完一個才會做下一個
-    begin 
-      item1.calc_expected();
-
-      driver_task(intf,item1);
-      monitor_task(intf,item1);
-      scoreboard_check(item1);
-    end
-  endtask
-  
-  // ------------------------------------------------------------
-// Day 12: Generator task
-// ------------------------------------------------------------
-
-// task automatic generator_task(
-//   input int num_tests
-// );
-
-//   alu_transaction tr;
-
-//   begin
-//     for (int i = 0; i < num_tests; i++) begin
-//       tr = new($sformatf("GEN_RANDOM_%0d", i));
-
-//       if (!tr.randomize()) begin
-//         $fatal(1, "Randomization failed");
-//       end
-
-//       tr.calc_expected();
-
-//       gen2drv_mbx.put(tr);
-
-//       $display("GEN: put %s into mailbox", tr.name);
-//     end
-//   end
-
-// endtask
-
-// ------------------------------------------------------------
-// Day 12: Driver gets transactions from mailbox
-// ------------------------------------------------------------
-
-task automatic driver_from_mailbox_task(
-  input int num_tests
-);
-
-  alu_transaction tr;
-
-  begin
-    for (int i = 0; i < num_tests; i++) begin
-      gen2drv_mbx.get(tr);
-
-      $display("DRV: got %s from mailbox", tr.name);
-
-      drv.drive(tr);
-      monitor_task(intf, tr);
-      scoreboard_check(tr);
-
-
-    end
-  end
-
-endtask
-
-
-  // ------------------------------------------------------------
-  // Helper task for directed tests
-  // ------------------------------------------------------------
-  //run_directed_test(4'sd3,    4'sd2,   2'b00, "ADD");
-  task automatic run_directed_test(
-    input logic signed [3:0] test_a,
-    input logic signed [3:0] test_b,
-    input logic        [1:0] test_op,
-    input string             test_name
-  );
-    //tr叫做handle，可以想像成住家地址
-    //alu_transaction是Class型別
-    //new()建立object
-    //tr.a，透過handle存取object裡的a
-    alu_transaction tr; // 宣告：我要一個 transaction 變數，名字叫 tr。 注意，在這個時候object還沒被產生
-
-    begin
-      tr = new(test_name);  //object這裡才被建立
-      tr.a  = test_a;
-      tr.b  = test_b;
-      tr.op = test_op;
-
-      run_transaction(tr);
-    end
-  endtask
-
-  // ------------------------------------------------------------
   // Main test
   // ------------------------------------------------------------
 
@@ -454,11 +414,7 @@ endtask
     $dumpfile("wave.vcd");
     $dumpvars(0, tb);
 
-    alu_cov = new();
-    sb = new();
-
-    //pass_count = 0;
-    //fail_count = 0;
+    env     = new(intf, intf);
 
     intf.rst_n = 0;
     intf.a = 0;
@@ -468,50 +424,15 @@ endtask
     repeat (2) @(posedge intf.clk);
     intf.rst_n = 1;
 
-    // Directed tests
-    run_directed_test(4'sd3,    4'sd2,   2'b00, "ADD");
-    run_directed_test(4'sd3,    4'sd5,   2'b01, "SUB");
-    run_directed_test(4'sb0011, 4'sd0,   2'b10, "INV");
-    run_directed_test(4'sd0,    4'b0000, 2'b11, "OR zero");
-    run_directed_test(4'sd0,    4'b0100, 2'b11, "OR nonzero");
+    env.run_directed_suite();
 
-    run_directed_test(4'sd7,    4'sd7,   2'b00, "ADD max positive");
-    run_directed_test(-4'sd8,   4'sd7,   2'b01, "SUB negative edge");
-
-    // Extra directed tests for coverage closure
-    run_directed_test(4'sd0,    4'sd3,   2'b00, "ADD a zero");
-    run_directed_test(4'sd0,    4'sd3,   2'b01, "SUB a zero");
-
-    run_directed_test(-4'sd1,   4'sd3,   2'b00, "ADD a negative");
-    run_directed_test(4'sd3,   -4'sd1,   2'b00, "ADD b negative");
-
-    run_directed_test(4'sd0,    4'sd0,   2'b10, "INV a zero");
-    run_directed_test(-4'sd1,   4'sd0,   2'b10, "INV a negative");
-
-    run_directed_test(4'sd2,    4'sd1,   2'b11, "OR a positive");
-    run_directed_test(-4'sd2,   4'sd1,   2'b11, "OR a negative");
-
-    // Day 12: Random tests using generator + mailbox
-    gen2drv_mbx = new(1);  //信箱的容量是1，代表一次只能放一個transaction。可以透過這個了解put get怎麼跟mailbox互動
-
-    gen = new(gen2drv_mbx);
-    drv = new(gen2drv_mbx, intf);
-    if (drv == null)
+    // Random tests using components owned by the environment
+    if (env.drv == null)
       $fatal(1, "Driver construction failed");
     else
       $display("Driver object constructed successfully");
 
-    fork //fork join裡面的東西平行一起處理。begin end裡面的東西照順序執行
-    //put = 放進 mailbox
-    //get = 從 mailbox 拿出來
-
-    //如果 mailbox 空的，get 會等。
-    //fork...join 讓 generator 和 driver 同時跑。
-    //所以 generator 一邊放，driver 一邊拿。
-      gen.run(50);
-     
-      driver_from_mailbox_task(50);
-    join
+    env.run(50);
 
 
 
@@ -519,12 +440,12 @@ endtask
 
     $display("----------------------------------------");
     $display("Simulation completed.");
-    $display("PASS count = %0d", sb.pass_count);
-    $display("FAIL count = %0d", sb.fail_count);
-    $display("Functional coverage = %0.2f%%", alu_cov.get_inst_coverage());
+    $display("PASS count = %0d", env.sb.pass_count);
+    $display("FAIL count = %0d", env.sb.fail_count);
+    $display("Functional coverage = %0.2f%%", env.sb.get_coverage());
     $display("----------------------------------------");
 
-    if (sb.fail_count == 0)
+    if (env.sb.fail_count == 0)
       $display("ALL TESTS PASSED");
     else
       $display("SOME TESTS FAILED");
