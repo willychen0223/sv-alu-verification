@@ -31,6 +31,71 @@ class alu_transaction; //設計圖 模板
 
 endclass
 
+class alu_scoreboard;
+
+  int pass_count;
+  int fail_count;
+
+  function new();
+    pass_count = 0;
+    fail_count = 0;
+  endfunction
+
+  function void check(input alu_transaction tr);
+
+    if (tr.actual !== tr.expected) begin
+      fail_count++;
+
+      $display(
+        "FAIL: %s, a=%0d, b=%0d, op=%b, expected=%0d, actual=%0d",
+        tr.name, tr.a, tr.b, tr.op, tr.expected, tr.actual
+      );
+    end
+    else begin
+      pass_count++;
+
+      $display(
+        "PASS: %s, a=%0d, b=%0d, op=%b, result=%0d",
+        tr.name, tr.a, tr.b, tr.op, tr.actual
+      );
+    end
+
+  endfunction
+
+endclass
+
+class alu_generator;
+
+  mailbox #(alu_transaction) gen2drv_mbx;
+
+  function new(
+    mailbox #(alu_transaction) gen2drv_mbx
+  );
+    this.gen2drv_mbx = gen2drv_mbx;
+  endfunction
+
+  task run(input int num_tests);
+
+    alu_transaction tr;
+
+    for (int i = 0; i < num_tests; i++) begin
+      tr = new($sformatf("GEN_RANDOM_%0d", i));
+
+      if (!tr.randomize()) begin
+        $fatal(1, "Randomization failed");
+      end
+
+      tr.calc_expected();
+
+      gen2drv_mbx.put(tr);
+
+      $display("GEN: put %s into mailbox", tr.name);
+    end
+
+  endtask
+
+endclass
+
 interface alu_if;
 
   logic clk;
@@ -125,12 +190,14 @@ module tb;
   //class object：需要 new()
   //virtual interface：只是指標，不用 new()
 
-  int pass_count;
-  int fail_count;
+  //int pass_count;
+  //int fail_count;
 
   // Day 12 : mailbox between geneator and driver
   mailbox #(alu_transaction) gen2drv_mbx;
+  alu_generator gen;
   alu_driver drv;
+  alu_scoreboard sb;
 
 //gen2drv_mbx 是一個信箱。
 //它專門傳 alu_transaction。
@@ -275,17 +342,7 @@ module tb;
     begin
       alu_cov.sample(tr.a, tr.b, tr.op, tr.actual); //算functional coverage 
 
-      if (tr.actual !== tr.expected) begin
-        fail_count++;
-
-        $display("FAIL: %s, a=%0d, b=%0d, op=%b, expected=%0d, actual=%0d",
-                 tr.name, tr.a, tr.b, tr.op, tr.expected, tr.actual);
-      end else begin
-        pass_count++;
-
-        $display("PASS: %s, a=%0d, b=%0d, op=%b, result=%0d",
-                 tr.name, tr.a, tr.b, tr.op, tr.actual);
-      end
+      sb.check(tr);
     end
   endtask
 
@@ -310,29 +367,29 @@ module tb;
 // Day 12: Generator task
 // ------------------------------------------------------------
 
-task automatic generator_task(
-  input int num_tests
-);
+// task automatic generator_task(
+//   input int num_tests
+// );
 
-  alu_transaction tr;
+//   alu_transaction tr;
 
-  begin
-    for (int i = 0; i < num_tests; i++) begin
-      tr = new($sformatf("GEN_RANDOM_%0d", i));
+//   begin
+//     for (int i = 0; i < num_tests; i++) begin
+//       tr = new($sformatf("GEN_RANDOM_%0d", i));
 
-      if (!tr.randomize()) begin
-        $fatal(1, "Randomization failed");
-      end
+//       if (!tr.randomize()) begin
+//         $fatal(1, "Randomization failed");
+//       end
 
-      tr.calc_expected();
+//       tr.calc_expected();
 
-      gen2drv_mbx.put(tr);
+//       gen2drv_mbx.put(tr);
 
-      $display("GEN: put %s into mailbox", tr.name);
-    end
-  end
+//       $display("GEN: put %s into mailbox", tr.name);
+//     end
+//   end
 
-endtask
+// endtask
 
 // ------------------------------------------------------------
 // Day 12: Driver gets transactions from mailbox
@@ -398,9 +455,10 @@ endtask
     $dumpvars(0, tb);
 
     alu_cov = new();
+    sb = new();
 
-    pass_count = 0;
-    fail_count = 0;
+    //pass_count = 0;
+    //fail_count = 0;
 
     intf.rst_n = 0;
     intf.a = 0;
@@ -435,6 +493,8 @@ endtask
 
     // Day 12: Random tests using generator + mailbox
     gen2drv_mbx = new(1);  //信箱的容量是1，代表一次只能放一個transaction。可以透過這個了解put get怎麼跟mailbox互動
+
+    gen = new(gen2drv_mbx);
     drv = new(gen2drv_mbx, intf);
     if (drv == null)
       $fatal(1, "Driver construction failed");
@@ -448,7 +508,8 @@ endtask
     //如果 mailbox 空的，get 會等。
     //fork...join 讓 generator 和 driver 同時跑。
     //所以 generator 一邊放，driver 一邊拿。
-      generator_task(50);
+      gen.run(50);
+     
       driver_from_mailbox_task(50);
     join
 
@@ -458,12 +519,12 @@ endtask
 
     $display("----------------------------------------");
     $display("Simulation completed.");
-    $display("PASS count = %0d", pass_count);
-    $display("FAIL count = %0d", fail_count);
+    $display("PASS count = %0d", sb.pass_count);
+    $display("FAIL count = %0d", sb.fail_count);
     $display("Functional coverage = %0.2f%%", alu_cov.get_inst_coverage());
     $display("----------------------------------------");
 
-    if (fail_count == 0)
+    if (sb.fail_count == 0)
       $display("ALL TESTS PASSED");
     else
       $display("SOME TESTS FAILED");
