@@ -37,27 +37,33 @@ interface alu_if;
   logic rst_n;
   logic signed [3:0] a;
   logic signed [3:0] b;
-  logic [1:0] op;
+  logic        [1:0] op;
   logic signed [4:0] c;
-    //modport 可以理解成 interface 的權限與方向說明書。
-    modport DRIVER (   //DRIVER可以寫rst_n, a, b, op。Driver是modport的名稱
-    input  clk,
-    input  c,
-    output rst_n,
-    output a,
-    output b,
-    output op
-  );
-  //當某個元件透過 DRIVER 這個視角使用 interface 時，
-  //它可以驅動 rst_n、a、b、op，並讀取 clk、c。
 
-    modport MONITOR (
-    input clk,
-    input rst_n,
-    input a,
-    input b,
-    input op,
-    input c
+  clocking driver_cb @(negedge clk);
+    default output #0;
+
+    output a;
+    output b;
+    output op;
+  endclocking
+
+  clocking monitor_cb @(negedge clk);
+    default input #1step;
+
+    input rst_n;
+    input a;
+    input b;
+    input op;
+    input c;
+  endclocking
+
+  modport DRIVER (
+    clocking driver_cb
+  );
+
+  modport MONITOR (
+    clocking monitor_cb
   );
 
 endinterface
@@ -201,10 +207,10 @@ module tb;
     input alu_transaction tr
   );
     begin
-      @(posedge vif.clk);
-      vif.a  = tr.a;
-      vif.b  = tr.b;
-      vif.op = tr.op;
+      @(vif.driver_cb);
+      vif.driver_cb.a  <= tr.a;
+      vif.driver_cb.b  <= tr.b;
+      vif.driver_cb.op <= tr.op;
     end
   endtask
 
@@ -217,9 +223,8 @@ module tb;
     input alu_transaction tr
   );
     begin
-      @(posedge vif.clk);
-      #1; //等DUT算好
-      tr.actual = vif.c;
+      @(vif.monitor_cb);
+      tr.actual = vif.monitor_cb.c;
     end
   endtask
 
