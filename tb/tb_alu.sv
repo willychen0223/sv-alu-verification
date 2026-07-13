@@ -68,7 +68,43 @@ interface alu_if;
 
 endinterface
 
-  
+class alu_driver;
+
+  mailbox #(alu_transaction) gen2drv_mbx;
+  virtual alu_if.DRIVER vif;
+
+  function new(
+    mailbox #(alu_transaction) gen2drv_mbx,
+    virtual alu_if.DRIVER vif
+  );
+    this.gen2drv_mbx = gen2drv_mbx;
+    this.vif         = vif;
+  endfunction
+
+  task drive(input alu_transaction tr);
+
+    @(vif.driver_cb);
+    vif.driver_cb.a  <= tr.a;
+    vif.driver_cb.b  <= tr.b;
+    vif.driver_cb.op <= tr.op;
+
+  endtask
+
+  task run(input int num_tests);
+
+    alu_transaction tr;
+
+    for (int i = 0; i < num_tests; i++) begin
+      gen2drv_mbx.get(tr);
+
+      $display("DRV: got %s from mailbox", tr.name);
+
+      drive(tr);
+    end
+
+  endtask
+
+endclass
   
 
 module tb;
@@ -94,6 +130,7 @@ module tb;
 
   // Day 12 : mailbox between geneator and driver
   mailbox #(alu_transaction) gen2drv_mbx;
+  alu_driver drv;
 
 //gen2drv_mbx 是一個信箱。
 //它專門傳 alu_transaction。
@@ -313,9 +350,11 @@ task automatic driver_from_mailbox_task(
 
       $display("DRV: got %s from mailbox", tr.name);
 
-      driver_task(intf,tr);
-      monitor_task(intf,tr);
+      drv.drive(tr);
+      monitor_task(intf, tr);
       scoreboard_check(tr);
+
+
     end
   end
 
@@ -396,6 +435,11 @@ endtask
 
     // Day 12: Random tests using generator + mailbox
     gen2drv_mbx = new(1);  //信箱的容量是1，代表一次只能放一個transaction。可以透過這個了解put get怎麼跟mailbox互動
+    drv = new(gen2drv_mbx, intf);
+    if (drv == null)
+      $fatal(1, "Driver construction failed");
+    else
+      $display("Driver object constructed successfully");
 
     fork //fork join裡面的東西平行一起處理。begin end裡面的東西照順序執行
     //put = 放進 mailbox
